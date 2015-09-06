@@ -1,35 +1,36 @@
-//! 
-//! A simple demonstration of how to construct and use Canvasses by splitting up the window.
-//!
+mod hangman;
+
 #[macro_use] extern crate conrod;
 extern crate find_folder;
 extern crate piston_window;
 extern crate graphics;
 
+use hangman::*;
 use conrod::{Canvas, Theme, Widget};
 use piston_window::*;
-use conrod::color::{Color};
 
 type Ui = conrod::Ui<Glyphs>;
 const APP_TITLE: &'static str = "Hangende";
 const KEYBOARD_MAP:[&'static str;3] = ["qwertyuiop[", "asdfghjkl;'","zxcvbnm,./"];
-const LETTER_MAP: [&'static str; 3] = ["qwertyuiopü", "asdfghjklöä", "zxcvbnmẞ  "];
+const LETTER_MAP: [&'static str; 3] = ["qwertyuiopü", "asdfghjklöä", "zxcvbnmẞ   "];
 
 struct HungmanApp {
-	keys_matrix: Vec<Vec<bool>>
+	keys_matrix: Vec<Vec<bool>>,
+	word: String
 }
 
 impl HungmanApp {
 	fn new() -> HungmanApp {
 		HungmanApp {
-			keys_matrix : vec![vec![true; 30];3]
+			keys_matrix : vec![vec![true; 11];3],
+			word : "Hangende".to_string()
 		}
 	}
 }
 
 fn main() {
     // Construct the window.
-    let mut hm = HungmanApp::new();
+    let mut hm_app = HungmanApp::new();
  	let opengl = OpenGL::V3_2;
     let window: PistonWindow =
         WindowSettings::new(
@@ -58,21 +59,21 @@ fn main() {
         		if let Some(chr) = text.chars().nth(0) {
         			for (l, s) in KEYBOARD_MAP.iter().enumerate() {
         				if let Some(c) = s.chars().position(|s: char| s == chr) {
-        					hm.keys_matrix[l][c] = false;
+        					hm_app.keys_matrix[l][c] = false;
         				}
         			}
         		}
         		println!("{:?}", text);
         	});
         ui.handle_event(&event);
-        event.draw_2d(|c, g| draw_ui(&mut ui, c, g, &mut hm));
+        event.draw_2d(|c, g| draw_ui(&mut ui, c, g, &mut hm_app));
     }
 
 }
 
 
 // Draw the Ui.
-fn draw_ui(ui: &mut Ui, c: Context, g: &mut G2d, hm: &mut HungmanApp) {
+fn draw_ui(ui: &mut Ui, c: Context, g: &mut G2d, hm_app: &mut HungmanApp) {
     use conrod::color::{blue, light_orange, orange, dark_orange, red, white};
     use conrod::{Button, Toggle, Colorable, Label, Labelable, Positionable, Sizeable, Split, Tabs,
                  WidgetMatrix};
@@ -122,6 +123,36 @@ fn draw_ui(ui: &mut Ui, c: Context, g: &mut G2d, hm: &mut HungmanApp) {
         .bottom_right_of(RIGHT_COLUMN)
         .set(BOTTOM_RIGHT, ui);
 
+	let mut hidden_word = String::from("");
+	for ch in hm_app.word.chars() {
+    	for (l, s) in LETTER_MAP.iter().enumerate() {
+        	if let Some(c) = s.chars().position(|s: char| s == ch.to_lowercase().nth(0).unwrap()) {
+        		if hm_app.keys_matrix[l][c] == true {
+        			hidden_word.push('-');
+        		} else {
+        			hidden_word.push(ch)
+        		}
+        	}
+        }
+	}
+	let mut wrong_chars = 0;
+	for (l, v) in hm_app.keys_matrix.iter().enumerate() {
+		for (c, val) in v.iter().enumerate() {
+			if *val == false {
+				let ch = LETTER_MAP[l].chars().nth(c).unwrap();
+				if false == hm_app.word.chars().any(|c| ch == c.to_lowercase().nth(0).unwrap()) {
+					wrong_chars = wrong_chars + 1;
+				}
+			}
+		}
+	}
+
+    Label::new(&hidden_word)
+        .font_size(32)
+        .color(dark_orange().complement())
+        .mid_right_of(LEFT_COLUMN)
+        .set(WORD_LABEL, ui);
+
     Label::new("Foo!").color(white()).font_size(36).middle_of(TAB_FOO).set(FOO_LABEL, ui);
     Label::new("Bar!").color(white()).font_size(36).middle_of(TAB_BAR).set(BAR_LABEL, ui);
     Label::new("BAZ!").color(white()).font_size(36).middle_of(TAB_BAZ).set(BAZ_LABEL, ui);
@@ -150,102 +181,23 @@ fn draw_ui(ui: &mut Ui, c: Context, g: &mut G2d, hm: &mut HungmanApp) {
  				label.push(chr);
            	}
 
-            Toggle::new(hm.keys_matrix[_row][_col])
+            Toggle::new(hm_app.keys_matrix[_row][_col])
 				.rgba(r,g,b,a)
                 .dim(dim2)
                 .point(xy2)
-                .react(|new_val:bool| {
-                		 println!("Hey! {:?}", n);
-        				hm.keys_matrix[_row][_col] = false;
-                		 })
+                .react(|_| hm_app.keys_matrix[_row][_col] = false)
                 .label(&label)
                 .set(BUTTON + n, ui);
         });
 
 
     ui.draw_if_changed(c, g);
-    draw_hangman(ui, g, blue(), [330.0, 100.0], [200.0, 200.0] );
-}
 
-fn draw_hangman(ui: &mut Ui, g: &mut G2d, color: Color,
-	xy:[f64; 2], dim:[f64;2]) {
-	use graphics::*;
-	let head_prop = 5.0;
+    let state = ManState::from_mistakes(wrong_chars);
 
-	let hang1_dim = [xy[0] + dim[0]*3.0/4.0,
-					xy[1],
-					xy[0] + dim[0]*3.0/4.0,
-					xy[1] + dim[1]];
-
-	let hang2_dim = [xy[0] + dim[0]*1.0/2.0,
-					xy[1] + dim[1],
-					xy[0] + dim[0],
-					xy[1] + dim[1]];
-
-	let hang3_dim = [xy[0] + dim[0]*1.0/2.0,
-					xy[1],
-					xy[0] + dim[0]*3.0/4.0,
-					xy[1]];
-
-	let hang4_dim = [xy[0] + dim[0]*1.0/2.0,
-					xy[1] + dim[1]*1.0/5.0,
-					xy[0] + dim[0]*1.0/2.0,
-					xy[1]];
-
-	let head_dim = [xy[0] + dim[0]*2.0/7.0,
-					xy[1] + dim[1]*1.0/5.0,
-	 				dim[0]/head_prop,
-	 				dim[1]/head_prop];
-
-    Ellipse::new_border(color.to_fsa(), 5.0)
-        .draw(head_dim,
-              default_draw_state(),
-              math::abs_transform(ui.win_w, ui.win_h),
-              g);
-
-	let mut draw_line = |dim| {
-		Line::new(color.to_fsa(), 5.0)
-        	.draw(dim, default_draw_state(),
-                      math::abs_transform(ui.win_w, ui.win_h), g);
-        };
-
-	draw_line(hang1_dim);
-	draw_line(hang2_dim);
-	draw_line(hang3_dim);
-	draw_line(hang4_dim);
-
-	let body_dim = [xy[0] + dim[0]*1.0/2.0,
-					xy[1] + dim[1]*2.0/5.0,
-					xy[0] + dim[0]*1.0/2.0,
-					xy[1] + dim[1]*3.0/4.0];
-
-	draw_line(body_dim);
-
-	let leg1_dim = [xy[0] + dim[0]*1.0/2.0,
-					xy[1] + dim[1]*3.0/4.0,
-					xy[0] + dim[0]*3.0/5.0,
-					xy[1] + dim[1]*7.0/8.0];
-
-	let leg2_dim = [xy[0] + dim[0]*1.0/2.0,
-					xy[1] + dim[1]*3.0/4.0,
-					xy[0] + dim[0]*2.0/5.0,
-					xy[1] + dim[1]*7.0/8.0];
-
-	draw_line(leg1_dim);
-	draw_line(leg2_dim);
-
-	let hand1_dim = [xy[0] + dim[0]*1.0/2.0,
-					xy[1] + dim[1]*2.0/4.0,
-					xy[0] + dim[0]*3.0/5.0,
-					xy[1] + dim[1]*5.0/8.0];
-
-	let hand2_dim = [xy[0] + dim[0]*1.0/2.0,
-					xy[1] + dim[1]*2.0/4.0,
-					xy[0] + dim[0]*2.0/5.0,
-					xy[1] + dim[1]*5.0/8.0];
-
-	draw_line(hand1_dim);
-	draw_line(hand2_dim);
+    Hangman::new(blue(), [330.0, 100.0], [200.0, 200.0])
+    	.state(state)
+    	.draw(ui, g);
 }
 
 // Button matrix dimensions.
@@ -278,6 +230,7 @@ widget_ids! {
     FOO_LABEL,
     BAR_LABEL,
     BAZ_LABEL,
+    WORD_LABEL,
     BING,
     BONG,
 	BUTTON with COLS * ROWS, 
